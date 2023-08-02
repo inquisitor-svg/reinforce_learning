@@ -529,11 +529,11 @@ if __name__ == "__main__":
         done = False
         while not done:
             # Here define the policy for your agent
-
-            actions = [env_instance.action_space(agent_name) for agent_name in env_instance.agents]
-
-            if env_instance.continuous_actions == False:
-                env_instance.step(1)
+            for agent in env_instance.agents:
+                observation, reward, termination, truncation, info = env_instance.last()
+                action = None if termination or truncation else env_instance.action_space(
+                    agent).sample()  # this is where you would insert your policy
+                env_instance.step(action)
 
             viz.render()
             pygame.time.wait(50)  # Delay to make it human-viewable
