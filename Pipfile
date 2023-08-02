@@ -9,6 +9,7 @@ pyglet = "*"
 pygame = "*"
 gymnasium = "*"
 pettingzoo = "*"
+jupyterlab = "*"
 
 [dev-packages]
 
