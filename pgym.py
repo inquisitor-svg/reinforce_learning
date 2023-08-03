@@ -72,6 +72,8 @@ simple_world_comm.env(num_good=2, num_adversaries=4, num_obstacles=1,
 `continuous_actions`: Whether agent action spaces are discrete(default) or continuous
 
 """
+import pygame
+from pygame.locals import QUIT
 
 import numpy as np
 from gym.spaces import Discrete
@@ -477,17 +479,12 @@ class Scenario(BaseScenario):
             )
 
 
-import pygame
-import random
-from pygame.locals import QUIT
-
-
 class PyGameVisualizer:
-    def __init__(self, env, screen_size=600):
+    def __init__(self, env, screen_size=400):
         pygame.init()
         self.env = env
         self.screen_size = screen_size
-        self.screen = pygame.display.set_mode((screen_size, screen_size))
+        self.screen = pygame.display.set_mode((2.5*screen_size, 2*screen_size))
         pygame.display.set_caption('Environment Visualization')
 
     def draw_agent(self, agent, color=(255, 0, 0)):
@@ -527,14 +524,24 @@ if __name__ == "__main__":
     for episode in range(100):
         env_instance.reset()
         done = False
+
         while not done:
-            # Here define the policy for your agent
+            # Collect actions for all agents
+            actions = []
             for agent in env_instance.agents:
                 observation, reward, termination, truncation, info = env_instance.last()
-                action = None if termination or truncation else env_instance.action_space(
-                    agent).sample()  # this is where you would insert your policy
+                if termination or truncation:
+                    done = True
+                    actions.append(None)  # No action if termination or truncation
+                else:
+                    action = env_instance.action_space(agent).sample()
+                    actions.append(action)
+
+            # Step environment with collected actions
+            for action in actions:
                 env_instance.step(action)
 
             viz.render()
             pygame.time.wait(50)  # Delay to make it human-viewable
+
     viz.close()
