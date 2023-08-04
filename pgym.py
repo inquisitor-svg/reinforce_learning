@@ -487,13 +487,28 @@ class PyGameVisualizer:
         self.screen = pygame.display.set_mode((2.5*screen_size, 2*screen_size))
         pygame.display.set_caption('Environment Visualization')
 
+    def _convert_position(self, position):
+        """Convert the position from its state to screen coordinates."""
+        return ((position + 1) * self.screen_size / 2).astype(int)
+
     def draw_agent(self, agent, color=(255, 0, 0)):
-        position = ((agent.state.p_pos + 1) * self.screen_size / 2).astype(int)
+        position = self._convert_position(agent.state.p_pos)
         pygame.draw.circle(self.screen, color, position, int(agent.size * self.screen_size))
 
     def draw_landmark(self, landmark, color=(0, 0, 255)):
-        position = ((landmark.state.p_pos + 1) * self.screen_size / 2).astype(int)
+        position = self._convert_position(landmark.state.p_pos)
         pygame.draw.circle(self.screen, color, position, int(landmark.size * self.screen_size))
+
+    def draw_food(self, food, color=(255, 255, 0)):  # Yellow color for food
+        position = ((food.state.p_pos + 1) * self.screen_size / 2).astype(int)
+        pygame.draw.circle(self.screen, color, position, int(food.size * self.screen_size))
+
+    def draw_forest(self, forest, color=(0, 128, 0)):
+        position = self._convert_position(forest.state.p_pos)
+        pygame.draw.rect(self.screen, color, (position[0] - int(forest.size * self.screen_size / 2),
+                                              position[1] - int(forest.size * self.screen_size / 2),
+                                              int(forest.size * self.screen_size),
+                                              int(forest.size * self.screen_size)))
 
     def render(self):
         for event in pygame.event.get():
@@ -505,6 +520,14 @@ class PyGameVisualizer:
         # Draw landmarks first
         for landmark in self.env.world.landmarks:
             self.draw_landmark(landmark)
+
+        # Draw food
+        for food in self.env.world.food:
+            self.draw_food(food)
+
+        # Draw forests
+        for forest in self.env.world.forests:
+            self.draw_forest(forest)
 
         # Draw agents
         for agent in self.env.world.agents:
@@ -530,10 +553,12 @@ if __name__ == "__main__":
             actions = []
             for agent in env_instance.agents:
                 observation, reward, termination, truncation, info = env_instance.last()
+                print(observation)
                 if termination or truncation:
                     done = True
                     actions.append(None)  # No action if termination or truncation
                 else:
+                    # TODO: 需要修改这里来制定Q-learning之类的策略
                     action = env_instance.action_space(agent).sample()
                     actions.append(action)
 
