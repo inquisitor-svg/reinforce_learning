@@ -72,30 +72,34 @@ simple_world_comm.env(num_good=2, num_adversaries=4, num_obstacles=1,
 `continuous_actions`: Whether agent action spaces are discrete(default) or continuous
 
 """
+import random
 import pygame
 from pygame.locals import QUIT
-
 import numpy as np
 from gym.spaces import Discrete
 from gymnasium.utils import EzPickle
-
 from pettingzoo.mpe._mpe_utils.core import Agent, Landmark, World
 from pettingzoo.mpe._mpe_utils.scenario import BaseScenario
 from pettingzoo.mpe._mpe_utils.simple_env import SimpleEnv, make_env
 from pettingzoo.utils.conversions import parallel_wrapper_fn
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+import gym
 
 
 class raw_env(SimpleEnv, EzPickle):
     def __init__(
-        self,
-        num_good=2,
-        num_adversaries=4,
-        num_obstacles=1,
-        num_food=2,
-        max_cycles=25,
-        num_forests=2,
-        continuous_actions=False,
-        render_mode=None,
+            self,
+            num_good=2,
+            num_adversaries=4,
+            num_obstacles=1,
+            num_food=2,
+            max_cycles=25,
+            num_forests=2,
+            continuous_actions=False,
+            render_mode=None,
     ):
         EzPickle.__init__(
             self,
@@ -129,12 +133,12 @@ parallel_env = parallel_wrapper_fn(env)
 
 class Scenario(BaseScenario):
     def make_world(
-        self,
-        num_good_agents=2,
-        num_adversaries=4,
-        num_landmarks=1,
-        num_food=2,
-        num_forests=2,
+            self,
+            num_good_agents=2,
+            num_adversaries=4,
+            num_landmarks=1,
+            num_food=2,
+            num_forests=2,
     ):
         world = World()
         # set any world properties first
@@ -287,10 +291,10 @@ class Scenario(BaseScenario):
 
     def outside_boundary(self, agent):
         if (
-            agent.state.p_pos[0] > 1
-            or agent.state.p_pos[0] < -1
-            or agent.state.p_pos[1] > 1
-            or agent.state.p_pos[1] < -1
+                agent.state.p_pos[0] > 1
+                or agent.state.p_pos[0] < -1
+                or agent.state.p_pos[1] > 1
+                or agent.state.p_pos[1] < -1
         ):
             return True
         else:
@@ -479,12 +483,110 @@ class Scenario(BaseScenario):
             )
 
 
+LR_ACTOR = 0.01     # 策略网络的学习率
+LR_CRITIC = 0.001   # 价值网络的学习率
+GAMMA = 0.9         # 奖励的折扣因子
+EPSILON = 0.9       # ϵ-greedy 策略的概率
+TARGET_REPLACE_ITER = 100                 # 目标网络更新的频率
+e = raw_env()
+N_ACTIONS = 34          # 动作数
+N_SPACES = 192  # 状态数量
+
+
+# 网络参数初始化，采用均值为 0，方差为 0.1 的高斯分布
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        nn.init.normal_(m.weight, mean = 0, std = 0.1)
+
+
+# 策略网络
+class Actor(nn.Module):
+    def __init__(self):
+        super(Actor, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(N_SPACES, 50),
+            nn.ReLU(),
+            nn.Linear(50, N_ACTIONS)  # 输出为各个动作的概率，维度为 3
+        )
+
+    def forward(self, s):
+        # 如果s是一维的（形状为[batch_size]），将其变为二维（形状为[1, batch_size]）
+        if len(s.shape) == 1 and s.shape[0] < N_SPACES:
+            s = F.pad(s, (0, N_SPACES - s.shape[0]))
+        elif len(s.shape) == 2 and s.shape[1] < N_SPACES:
+            s = F.pad(s, (1, N_SPACES - s.shape[0]))
+
+        output = self.net(s)
+        output = F.softmax(output, dim=-1)  # 概率归一化
+        return output
+
+
+# 价值网络
+class Critic(nn.Module):
+    def __init__(self):
+        super(Critic, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(N_SPACES, 20),
+            nn.ReLU(),
+            nn.Linear(20, 1)  # 输出值是对当前状态的打分，维度为 1
+        )
+
+    def forward(self, s):
+        if s.shape[0] < N_SPACES:
+            s = F.pad(s, (0, N_SPACES - s.shape[0]))
+        output = self.net(s)
+        return output
+
+
+# A2C 的主体函数
+class A2C :
+    def __init__(self):
+        # 初始化策略网络，价值网络和目标网络。价值网络和目标网络使用同一个网络
+        self.actor_net, self.critic_net, self.target_net = Actor().apply(init_weights), Critic().apply(init_weights), Critic().apply(init_weights)
+        self.learn_step_counter = 0 # 学习步数
+        self.optimizer_actor = optim.Adam(self.actor_net.parameters(), lr = LR_ACTOR)    # 策略网络优化器
+        self.optimizer_critic = optim.Adam(self.critic_net.parameters(), lr = LR_CRITIC) # 价值网络优化器
+        self.criterion_critic = nn.MSELoss()  # 价值网络损失函数
+
+    def choose_action(self, s):
+        s = torch.unsqueeze(torch.FloatTensor(s), dim=0)  # 增加维度
+        if np.random.uniform() < EPSILON :                  # ϵ-greedy 策略对动作进行采取
+            action_value = self.actor_net(s)
+            action = torch.max(action_value, dim=1)[1].item()
+        else:
+            action = np.random.randint(0, N_ACTIONS)
+
+        return action
+
+    def learn(self, s, a, r, s_):
+        if self.learn_step_counter % TARGET_REPLACE_ITER == 0 :          # 更新目标网络
+            self.target_net.load_state_dict(self.critic_net.state_dict())
+
+        self.learn_step_counter += 1
+
+        s = torch.FloatTensor(s)
+        s_ = torch.FloatTensor(s_)
+
+        q_critic = self.critic_net(s)             # 价值对当前状态进行打分
+        q_next = self.target_net(s_).detach()     # 目标网络对下一个状态进行打分
+        q_target = r + GAMMA * q_next             # 更新 TD 目标
+
+        # 更新价值网络
+        loss_critic = self.criterion_critic(q_critic, q_target)
+        self.optimizer_critic.zero_grad()
+        loss_critic.backward()
+        self.optimizer_critic.step()
+
+        self.optimizer_actor.zero_grad()
+        self.optimizer_actor.step()
+
+
 class PyGameVisualizer:
     def __init__(self, env, screen_size=400):
         pygame.init()
         self.env = env
         self.screen_size = screen_size
-        self.screen = pygame.display.set_mode((2.5*screen_size, 2*screen_size))
+        self.screen = pygame.display.set_mode((2.5 * screen_size, 2 * screen_size))
         pygame.display.set_caption('Environment Visualization')
 
     def _convert_position(self, position):
@@ -543,30 +645,55 @@ class PyGameVisualizer:
 if __name__ == "__main__":
     env_instance = raw_env()
     viz = PyGameVisualizer(env_instance)
-
-    for episode in range(100):
+    a2c = A2C()
+    for episode in range(10000):
         env_instance.reset()
+        ep_r = 0
         done = False
-
         while not done:
-            # Collect actions for all agents
             actions = []
-            for agent in env_instance.agents:
-                observation, reward, termination, truncation, info = env_instance.last()
-                print(observation)
+            first_state = None
+            for agent in env_instance.world.agents:
+                s, reward, termination, truncation, info = env_instance.last()  # Set s as the current observation
+                first_state = s
+                for food in env_instance.world.food:
+                    distance = np.linalg.norm(food.state.p_pos - agent.state.p_pos)
+                    if distance < 1 and agent.adversary == False:
+                        reward += 30
+                        env_instance.rewards[agent.name] += 10
+                    elif distance < 1 and agent.adversary == True:
+                        env_instance.rewards[agent.name] -= 10
                 if termination or truncation:
                     done = True
                     actions.append(None)  # No action if termination or truncation
+                elif not agent.adversary:
+                    if agent.leader:
+                        action = a2c.choose_action(s)
+                        actions.append(action)
+                    else:
+                        action = env_instance.action_space(agent.name).sample()
+                        actions.append(action)
                 else:
-                    # TODO: 需要修改这里来制定Q-learning之类的策略
-                    action = env_instance.action_space(agent).sample()
+                    action = env_instance.action_space(agent.name).sample()
                     actions.append(action)
 
             # Step environment with collected actions
+            for a in actions:
+                env_instance.step(a)
+            # After stepping, we get the new state, reward, done and info
+            s_ = env_instance.state()
+            r = 0
+            for rew in env_instance.rewards:
+                r+=env_instance.rewards[rew]
+            # Update the model using old state, action, reward and new state
             for action in actions:
-                env_instance.step(action)
+                if action is not None:  # Make sure the agent was not terminated or truncated
+                    a2c.learn(first_state, action, r, s_)
+
+            s = s_  # Update the current state to the new state
+            ep_r += r  # Add up rewards for this episode
 
             viz.render()
             pygame.time.wait(50)  # Delay to make it human-viewable
-
+        print(f'Ep: {episode} | Ep_r: {round(ep_r, 2)}')
     viz.close()

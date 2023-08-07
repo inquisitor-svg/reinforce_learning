@@ -10,6 +10,10 @@ pygame = "*"
 gymnasium = "*"
 pettingzoo = "*"
 jupyterlab = "*"
+torch = "==2.0.1"
+torch-explain = "==1.5.1"
+imageio-ffmpeg = "*"
+net = "*"
 
 [dev-packages]
 
